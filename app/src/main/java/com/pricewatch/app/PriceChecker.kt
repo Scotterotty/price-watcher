@@ -47,13 +47,15 @@ class PriceChecker(private val context: Context) {
             return CheckResult(item.copy(lastError = "Add a store link to start tracking"), null)
         }
         val now = System.currentTimeMillis()
-        val readings = item.urls.mapNotNull { url ->
-            val host = hostOf(url)
-            fetchPrice(url, host)?.let { PricePoint(now, it, storeName(host)) }
-        }
+        val outcomes = item.urls.map { fetch(it) }
+        val readings = outcomes.mapNotNull { o -> o.price?.let { PricePoint(now, it, storeName(o.host)) } }
         val best = readings.minByOrNull { it.price }
             ?: return CheckResult(
-                item.copy(lastChecked = now, lastError = "Couldn't read a price from any link"),
+                item.copy(
+                    lastChecked = now,
+                    lastError = outcomes.mapNotNull { it.problem }.distinct().joinToString("\n")
+                        .ifEmpty { "Couldn't read a price from any link" },
+                ),
                 null,
             )
         return evaluate(item, best, now)
@@ -93,7 +95,7 @@ class PriceChecker(private val context: Context) {
             try { URI(url.trim()).host?.removePrefix("www.") ?: "" } catch (e: Exception) { "" }
 
         fun storeName(host: String): String = when {
-            "amazon." in host -> "Amazon"
+            "amazon." in host || host == "a.co" || "amzn." in host -> "Amazon"
             "walmart." in host -> "Walmart"
             "bestbuy." in host -> "Best Buy"
             "target." in host -> "Target"
@@ -104,20 +106,53 @@ class PriceChecker(private val context: Context) {
         }
     }
 
-    private fun fetchPrice(url: String, host: String): Double? = try {
+    private data class Outcome(val price: Double?, val host: String, val problem: String?)
+
+    /**
+     * Try a plain HTTP request first (fast, cheap). If that's blocked or the
+     * price isn't in the raw HTML, load the page in a real browser engine.
+     */
+    private fun fetch(url: String): Outcome {
+        var host = hostOf(url)
+        var lastHtml: String? = null
+
+        httpGet(url)?.let { (html, finalHost) ->
+            host = finalHost
+            lastHtml = html
+            PriceParser.extract(html, host)?.let { return Outcome(it, host, null) }
+        }
+
+        val page = try { WebViewFetcher.load(context, url) } catch (e: Exception) { null }
+        if (page != null) {
+            host = hostOf(page.finalUrl).ifEmpty { host }
+            lastHtml = page.html
+            PriceParser.extract(page.html, host)?.let { return Outcome(it, host, null) }
+        }
+
+        val store = storeName(host)
+        val problem = when {
+            lastHtml == null -> "$store: couldn't load the page"
+            PriceParser.looksBlocked(lastHtml!!) -> "$store showed a robot check, will retry next time"
+            else -> "$store: no price on the page (out of stock?)"
+        }
+        return Outcome(null, host, problem)
+    }
+
+    /** Returns the page HTML and the host it ended up on after redirects. */
+    private fun httpGet(url: String): Pair<String, String>? = try {
         val req = Request.Builder()
             .url(url.trim())
             .header(
                 "User-Agent",
                 "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+                    "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
             )
             .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
             .header("Accept-Language", "en-US,en;q=0.9")
             .build()
         client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) null
-            else resp.body?.string()?.let { PriceParser.extract(it, host) }
+            val body = resp.body?.string()
+            if (body == null) null else body to resp.request.url.host.removePrefix("www.")
         }
     } catch (e: Exception) {
         null

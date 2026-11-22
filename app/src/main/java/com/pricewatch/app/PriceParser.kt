@@ -14,6 +14,9 @@ object PriceParser {
     private fun rx(p: String) = Regex(p, setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 
     private val amazon = listOf(
+        // "Price to pay" block, used on both the desktop and mobile sites.
+        rx("""class="a-price[^"]*priceToPay[^"]*".{0,300}?class="a-offscreen">\s*\$\s*$NUM"""),
+        rx("""id="(?:corePrice|apex)[A-Za-z_]*".{0,3000}?class="a-offscreen">\s*\$\s*$NUM"""),
         // The main buy-box price block, then its hidden "$59.99" text.
         rx("""id="corePrice(?:Display_desktop|_feature|_desktop)_div".{0,3000}?class="a-offscreen">\s*\$\s*$NUM"""),
         rx("""id="apex_desktop".{0,3000}?class="a-offscreen">\s*\$\s*$NUM"""),
@@ -28,11 +31,13 @@ object PriceParser {
 
     private val bestBuy = listOf(
         rx(""""customerPrice"\s*:\s*$NUM"""),
+        rx("""priceView-customer-price.{0,300}?>\s*\$$NUM"""),
         rx(""""currentPrice"\s*:\s*$NUM"""),
     )
 
     private val target = listOf(
         rx(""""current_retail"\s*:\s*$NUM"""),
+        rx("""data-test="product-price"[^>]*>\s*\$$NUM"""),
         rx(""""formatted_current_price"\s*:\s*"\$$NUM"""),
     )
 
@@ -65,6 +70,13 @@ object PriceParser {
         }
 
         return firstMatch(html, generic)
+    }
+
+    /** True when the page is a bot/captcha check instead of the product. */
+    fun looksBlocked(html: String): Boolean {
+        val h = html.lowercase()
+        return "captcha" in h || "robot check" in h || "are you a human" in h ||
+            "press & hold" in h || "access denied" in h || "/errors/validatecaptcha" in h
     }
 
     private fun firstMatch(html: String, patterns: List<Regex>): Double? {

@@ -2,6 +2,7 @@ package com.pricewatch.app
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PriceParserTest {
@@ -44,6 +45,21 @@ class PriceParserTest {
     @Test fun metaTag() {
         val html = """<meta property="product:price:amount" content="39.95">"""
         assertEquals(39.95, PriceParser.extract(html, "gamestop.com")!!, 0.001)
+    }
+
+    @Test fun amazonMobilePriceToPay() {
+        val html = """<div id="apex_offerDisplay_mobile"><span class="a-price aok-align-center priceToPay" data-a-size="xl">
+            <span class="a-offscreen">$64.99</span><span aria-hidden="true">...</span></span></div>"""
+        assertEquals(64.99, PriceParser.extract(html, "amazon.com")!!, 0.001)
+    }
+
+    @Test fun targetRendered() {
+        val html = """<span data-test="product-price" class="styles__x">$69.99</span>"""
+        assertEquals(69.99, PriceParser.extract(html, "target.com")!!, 0.001)
+    }
+
+    @Test fun detectsRobotCheck() {
+        assertTrue(PriceParser.looksBlocked("<form action=\"/errors/validateCaptcha\">Type the characters</form>"))
     }
 
     @Test fun nothingFound() {
