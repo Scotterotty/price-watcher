@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Price Watch</string>
+    <string name="widget_description">Current prices and all-time lows for the items you watch</string>
+</resources>

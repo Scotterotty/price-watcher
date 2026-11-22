@@ -1,0 +1,49 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --console=plain
+
+      - name: Build APK
+        run: |
+          ./gradlew assembleDebug --console=plain
+          cp app/build/outputs/apk/debug/app-debug.apk PriceWatch.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PriceWatch-apk
+          path: PriceWatch.apk
+
+      # Publish each build from main as a GitHub Release, so the APK can be
+      # downloaded straight from a phone browser.
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Price Watch build ${{ github.run_number }}
+          make_latest: true
+          files: PriceWatch.apk
+          body: |
+            Download **PriceWatch.apk** below on your phone and open it to install or update.
