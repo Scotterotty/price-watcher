@@ -212,6 +212,12 @@ class MainActivity : Activity() {
             setLineSpacing(dp(2).toFloat(), 1f)
         })
         item.lastError?.let { box.addView(text(it, 12f, 0xFFFFC266.toInt()).apply { setPadding(0, dp(4), 0, 0) }) }
+        if (item.lastError != null && DebugPages.files(this).isNotEmpty()) {
+            box.addView(text("Share what the app saw ›", 13f, Theme.CYAN, bold = true).apply {
+                setPadding(0, dp(10), 0, 0)
+                setOnClickListener { DebugPages.share(this@MainActivity) }
+            })
+        }
 
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

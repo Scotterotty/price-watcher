@@ -62,6 +62,30 @@ class PriceParserTest {
         assertTrue(PriceParser.looksBlocked("<form action=\"/errors/validateCaptcha\">Type the characters</form>"))
     }
 
+    @Test fun amazonVariantHiddenInput() {
+        val html = """<div id="twister_feature_div"><input type="hidden" id="twister-plus-price-data-price" value="289.99" />
+            <span class="a-price"><span class="a-offscreen"> </span></span></div>"""
+        assertEquals(289.99, PriceParser.extract(html, "amazon.com")!!, 0.001)
+    }
+
+    @Test fun amazonAokOffscreenWithAttributes() {
+        val html = """<div id="corePriceDisplay_mobile_feature_div"><span class="a-price" data-a-size="xl">
+            <span class="aok-offscreen" aria-hidden="false">  $289.99  </span></span></div>"""
+        assertEquals(289.99, PriceParser.extract(html, "amazon.com")!!, 0.001)
+    }
+
+    @Test fun amazonWholeAndFraction() {
+        val html = """<div id="corePriceDisplay_mobile_feature_div"><span class="a-price-symbol">$</span>
+            <span class="a-price-whole">1,289<span class="a-price-decimal">.</span></span><span class="a-price-fraction">99</span></div>"""
+        assertEquals(1289.99, PriceParser.extract(html, "amazon.com")!!, 0.001)
+    }
+
+    @Test fun newegg() {
+        val html = """<li class="price-current"><span class="price-current-label"></span>$<strong>289</strong><sup>.99</sup></li>"""
+        assertEquals(289.99, PriceParser.extract(html, "newegg.com")!!, 0.001)
+        assertEquals(98.99, PriceParser.extract("""{"Item":{"FinalPrice":98.99}}""", "newegg.com")!!, 0.001)
+    }
+
     @Test fun nothingFound() {
         assertNull(PriceParser.extract("<html><body>Sold out</body></html>", "target.com"))
     }

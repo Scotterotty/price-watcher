@@ -13,15 +13,29 @@ object PriceParser {
 
     private fun rx(p: String) = Regex(p, setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 
+    // Amazon's hidden screen-reader price text: <span class="a-offscreen">$289.99</span>
+    // (newer layouts use "aok-offscreen" and may add attributes or spaces).
+    private const val OFF = """class="(?:a|aok)-offscreen[^"]*"[^>]*>\s*\$\s*$NUM"""
+    private const val BOX = """id="(?:corePrice|apex)[A-Za-z_]*""""
+
     private val amazon = listOf(
         // "Price to pay" block, used on both the desktop and mobile sites.
-        rx("""class="a-price[^"]*priceToPay[^"]*".{0,300}?class="a-offscreen">\s*\$\s*$NUM"""),
-        rx("""id="(?:corePrice|apex)[A-Za-z_]*".{0,3000}?class="a-offscreen">\s*\$\s*$NUM"""),
-        // The main buy-box price block, then its hidden "$59.99" text.
-        rx("""id="corePrice(?:Display_desktop|_feature|_desktop)_div".{0,3000}?class="a-offscreen">\s*\$\s*$NUM"""),
-        rx("""id="apex_desktop".{0,3000}?class="a-offscreen">\s*\$\s*$NUM"""),
+        rx("""priceToPay.{0,500}?$OFF"""),
+        rx("""$BOX.{0,8000}?$OFF"""),
+        // Pages with size/colour variants keep the selected variant's price in hidden inputs.
+        rx("""twister-plus-price-data-price"[^>]*?value="$NUM""""),
+        rx("""attach-base-product-price"[^>]*?value="$NUM""""),
         rx(""""priceAmount"\s*:\s*$NUM"""),
+        // Visible price split into whole + fraction: 289<sup>.99</sup>
+        rx("""$BOX.{0,8000}?class="a-price-whole">([0-9,]+).{0,160}?class="a-price-fraction">([0-9]{2})"""),
         rx("""id="priceblock_(?:ourprice|dealprice)"[^>]*>\s*\$\s*$NUM"""),
+        // Last resort: the first price on the page, which is the main one on product pages.
+        rx(OFF),
+    )
+
+    private val newegg = listOf(
+        rx(""""FinalPrice"\s*:\s*$NUM"""),
+        rx("""class="price-current"[^>]*>.{0,200}?<strong>([0-9,]+)</strong>\s*<sup>\.?([0-9]{2})</sup>"""),
     )
 
     private val walmart = listOf(
@@ -58,6 +72,7 @@ object PriceParser {
             "walmart." in h -> walmart
             "bestbuy." in h -> bestBuy
             "target." in h -> target
+            "newegg." in h -> newegg
             else -> emptyList()
         }
         firstMatch(html, storeSpecific)?.let { return it }
@@ -82,7 +97,10 @@ object PriceParser {
     private fun firstMatch(html: String, patterns: List<Regex>): Double? {
         for (p in patterns) {
             val m = p.find(html) ?: continue
-            toPrice(m.groupValues[1])?.let { return it }
+            val g = m.groupValues
+            // Patterns with two groups capture whole dollars and cents separately.
+            val raw = if (g.size >= 3 && g[2].isNotEmpty()) "${g[1]}.${g[2]}" else g[1]
+            toPrice(raw)?.let { return it }
         }
         return null
     }

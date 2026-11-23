@@ -148,6 +148,7 @@ class PriceChecker(private val context: Context) {
         }
 
         val store = storeName(host)
+        lastHtml?.let { DebugPages.save(context, store, finalUrl, it) }
         val problem = when {
             lastHtml == null -> "$store: couldn't load the page"
             PriceParser.looksBlocked(lastHtml!!) -> "$store showed a robot check, will retry next time"
