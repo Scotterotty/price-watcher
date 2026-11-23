@@ -22,7 +22,9 @@ class PriceChecker(private val context: Context) {
     /** Checks every item, saves results, sends notifications and refreshes the widget. */
     fun checkAll() {
         val store = ItemStore(context)
-        val updated = store.load().map { item ->
+        val before = store.load()
+        val originalUrls = before.associate { it.id to it.urls }
+        val updated = before.map { item ->
             val result = check(item)
             result.alert?.let { Notifier.notifyPrice(context, result.item, it) }
             result.item
@@ -33,6 +35,8 @@ class PriceChecker(private val context: Context) {
             val checked = updated.firstOrNull { it.id == cur.id }
             if (checked == null) cur
             else cur.copy(
+                // Keep the cleaned-up links, unless they were edited during the check.
+                urls = if (cur.urls == originalUrls[cur.id]) checked.urls else cur.urls,
                 history = checked.history,
                 lastChecked = checked.lastChecked,
                 lastError = checked.lastError,
@@ -47,18 +51,20 @@ class PriceChecker(private val context: Context) {
             return CheckResult(item.copy(lastError = "Add a store link to start tracking"), null)
         }
         val now = System.currentTimeMillis()
-        val outcomes = item.urls.map { fetch(it) }
+        val outcomes = item.urls.map { fetch(Links.clean(it)) }
+        val resolvedUrls = outcomes.map { it.url }.distinct()
         val readings = outcomes.mapNotNull { o -> o.price?.let { PricePoint(now, it, storeName(o.host)) } }
         val best = readings.minByOrNull { it.price }
             ?: return CheckResult(
                 item.copy(
+                    urls = resolvedUrls,
                     lastChecked = now,
                     lastError = outcomes.mapNotNull { it.problem }.distinct().joinToString("\n")
                         .ifEmpty { "Couldn't read a price from any link" },
                 ),
                 null,
             )
-        return evaluate(item, best, now)
+        return evaluate(item.copy(urls = resolvedUrls), best, now)
     }
 
     companion object {
@@ -106,7 +112,8 @@ class PriceChecker(private val context: Context) {
         }
     }
 
-    private data class Outcome(val price: Double?, val host: String, val problem: String?)
+    /** [url] is the link to keep: Amazon short links become amazon.com/dp/ASIN. */
+    private data class Outcome(val price: Double?, val host: String, val problem: String?, val url: String)
 
     /**
      * Try a plain HTTP request first (fast, cheap). If that's blocked or the
@@ -114,19 +121,30 @@ class PriceChecker(private val context: Context) {
      */
     private fun fetch(url: String): Outcome {
         var host = hostOf(url)
+        var finalUrl = url
         var lastHtml: String? = null
 
-        httpGet(url)?.let { (html, finalHost) ->
-            host = finalHost
-            lastHtml = html
-            PriceParser.extract(html, host)?.let { return Outcome(it, host, null) }
+        fun resolved(): String {
+            if (storeName(host) != "Amazon") return url
+            val asin = Links.asinFromUrl(finalUrl) ?: lastHtml?.let { Links.asinFromHtml(it) } ?: return url
+            return Links.amazonProductUrl(asin, host)
         }
 
-        val page = try { WebViewFetcher.load(context, url) } catch (e: Exception) { null }
+        httpGet(url)?.let { (html, landedOn) ->
+            finalUrl = landedOn
+            host = hostOf(landedOn).ifEmpty { host }
+            lastHtml = html
+            PriceParser.extract(html, host)?.let { return Outcome(it, host, null, resolved()) }
+        }
+
+        // Retry with the clean product link if a short link resolved to one.
+        val target = resolved()
+        val page = try { WebViewFetcher.load(context, target) } catch (e: Exception) { null }
         if (page != null) {
+            finalUrl = page.finalUrl
             host = hostOf(page.finalUrl).ifEmpty { host }
             lastHtml = page.html
-            PriceParser.extract(page.html, host)?.let { return Outcome(it, host, null) }
+            PriceParser.extract(page.html, host)?.let { return Outcome(it, host, null, resolved()) }
         }
 
         val store = storeName(host)
@@ -135,10 +153,10 @@ class PriceChecker(private val context: Context) {
             PriceParser.looksBlocked(lastHtml!!) -> "$store showed a robot check, will retry next time"
             else -> "$store: no price on the page (out of stock?)"
         }
-        return Outcome(null, host, problem)
+        return Outcome(null, host, problem, resolved())
     }
 
-    /** Returns the page HTML and the host it ended up on after redirects. */
+    /** Returns the page HTML and the URL it ended up on after redirects. */
     private fun httpGet(url: String): Pair<String, String>? = try {
         val req = Request.Builder()
             .url(url.trim())
@@ -152,7 +170,7 @@ class PriceChecker(private val context: Context) {
             .build()
         client.newCall(req).execute().use { resp ->
             val body = resp.body?.string()
-            if (body == null) null else body to resp.request.url.host.removePrefix("www.")
+            if (body == null) null else body to resp.request.url.toString()
         }
     } catch (e: Exception) {
         null

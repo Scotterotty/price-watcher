@@ -254,7 +254,7 @@ class MainActivity : Activity() {
             setText(existing?.name ?: "")
         }
         val urls = EditText(this).apply {
-            hint = "Product links, one per line (Amazon, Best Buy, Walmart, Target…)"
+            hint = "Paste product links (Amazon, Best Buy, Walmart, Target…)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_VARIATION_URI
             minLines = 3
             gravity = Gravity.TOP
@@ -278,8 +278,7 @@ class MainActivity : Activity() {
                     Toast.makeText(this, "Give the item a name", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                val links = urls.text.toString().lines().map { it.trim() }
-                    .filter { it.startsWith("http://") || it.startsWith("https://") }
+                val links = Links.extract(urls.text.toString())
                 val t = target.text.toString().trim().removePrefix("$").toDoubleOrNull()
                 val item = existing?.copy(name = n, urls = links, targetPrice = t, lastAlertedPrice = null)
                     ?: WatchItem(name = n, urls = links, targetPrice = t)
